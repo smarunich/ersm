@@ -1,0 +1,89 @@
+version: '3'
+
+vars:
+  REGISTRY: us-east1-docker.pkg.dev/dogfood-cx/registryrepository
+  IMAGE_NAME: ersm
+  IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'
+
+tasks:
+  init:
+    desc: Initialize Go module and install dependencies
+    cmds:
+      - cmd: test -f go.mod || go mod init ersm
+        silent: true
+      - go get github.com/envoyproxy/go-control-plane/envoy/service/auth/v3
+      - go get github.com/envoyproxy/go-control-plane/envoy/config/core/v3
+      - go get google.golang.org/grpc
+      - go mod tidy
+
+  check-env:
+    desc: Check Go environment and display potential issues
+    cmds:
+      - go version
+      - go env
+      - go list -m all
+
+  view-main:
+    desc: View the content of main.go
+    cmds:
+      - cat main.go
+
+  build:
+    desc: Build the Go application
+    deps: [init]
+    cmds:
+      - go build -v -o main .
+    sources:
+      - ./**/*.go
+    generates:
+      - main
+    method: timestamp
+
+  docker-build:
+    desc: Build the Go application using Docker
+    deps: [init]
+    cmds:
+      - docker build -t {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} .
+
+  docker-push:
+    desc: Push the Docker image to the registry
+    deps: [docker-build]
+    cmds:
+      - docker push {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+
+  run:
+    desc: Run the Go application
+    deps: [build]
+    cmds:
+      - ./main
+
+  docker-run:
+    desc: Run the Go application using Docker
+    deps: [docker-build]
+    cmds:
+      - docker run -p 8080:8080 {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+
+  clean:
+    desc: Remove build artifacts and Docker image
+    cmds:
+      - rm -f main
+      - docker rmi {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+
+  default:
+    desc: Build and run the Go application
+    cmds:
+      - task: check-env
+      - task: view-main
+      - task: build
+      - task: run
+
+  k8s-deploy:
+    desc: Deploy the application to Kubernetes
+    deps: [docker-push]
+    cmds:
+      - sed 's|{{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}|{{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}|g' deployment.yaml | kubectl apply -f -
+
+  k8s-delete:
+    desc: Delete the Kubernetes deployment
+    cmds:
+      - kubectl delete -f deployment.yaml
