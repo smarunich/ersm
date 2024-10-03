@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -9,66 +8,99 @@ import (
 	"syscall"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	log "github.com/sirupsen/logrus" // Advanced logging with logrus
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-type headerModifier struct {
-	authv3.UnimplementedAuthorizationServer
+type externalProcessorServer struct {
+	extprocv3.UnimplementedExternalProcessorServer
 }
 
-func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
-	// Log method entry
-	log.Debug("Entered Check method")
-
-	// Log the full request at trace level
-	log.Tracef("Full CheckRequest: %+v", req)
-
-	// Log request attributes
-	log.Debugf("Request Attributes: %+v", req.Attributes)
-
-	// Extract the "session" header
-	sessionHeader := req.Attributes.Request.Http.Headers["session"]
-	if sessionHeader == "" {
-		log.Warn("Missing session header")
-		// Log the response before returning
-		resp := &authv3.CheckResponse{
-			Status: status.New(codes.PermissionDenied, "Missing session header").Proto(),
+func (s *externalProcessorServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			log.Errorf("Error receiving stream: %v", err)
+			return err
 		}
-		log.Debugf("Returning CheckResponse: %+v", resp)
-		return resp, nil
+
+		// Log the full request when debug mode is on
+		if log.IsLevelEnabled(log.DebugLevel) {
+			reqString := fmt.Sprintf("%+v", req)
+			log.Debugf("Received ProcessingRequest:\n%s", reqString)
+		}
+
+		switch v := req.Request.(type) {
+		case *extprocv3.ProcessingRequest_RequestHeaders:
+			log.Debug("Processing RequestHeaders")
+
+			// Extract the session header
+			sessionValue := getSessionHeader(v.RequestHeaders.Headers.GetHeaders())
+			if sessionValue == "" {
+				log.Warn("Missing session header")
+				// Optionally, you can send an immediate response to stop processing
+				// For now, let's continue without modifying headers
+			}
+
+			// Modify the session header and create a new header
+			newHeaderValue := fmt.Sprintf("session-%s", sessionValue)
+
+			resp := &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_RequestHeaders{
+					RequestHeaders: &extprocv3.HeadersResponse{
+						Response: &extprocv3.CommonResponse{
+							HeaderMutation: &extprocv3.HeaderMutation{
+								SetHeaders: []*corev3.HeaderValueOption{
+									{
+										Header: &corev3.HeaderValue{
+											Key:   "x-new-header",
+											Value: newHeaderValue,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			// Log the full response when debug mode is on
+			if log.IsLevelEnabled(log.DebugLevel) {
+				respString := fmt.Sprintf("%+v", resp)
+				log.Debugf("Sending ProcessingResponse:\n%s", respString)
+			}
+
+			if err := stream.Send(resp); err != nil {
+				log.Errorf("Error sending response: %v", err)
+				return err
+			}
+
+		case *extprocv3.ProcessingRequest_RequestBody:
+			log.Debug("Processing RequestBody")
+			// Handle request body if needed
+
+		case *extprocv3.ProcessingRequest_ResponseHeaders:
+			log.Debug("Processing ResponseHeaders")
+			// Handle response headers if needed
+
+		case *extprocv3.ProcessingRequest_ResponseBody:
+			log.Debug("Processing ResponseBody")
+			// Handle response body if needed
+
+		default:
+			log.Warnf("Received unknown request type: %T", v)
+		}
 	}
+}
 
-	// Modify the session header
-	newHeader := fmt.Sprintf("session-%s", sessionHeader)
-	headers := []*corev3.HeaderValueOption{
-		{
-			Header: &corev3.HeaderValue{
-				Key:   "x-new-header",
-				Value: newHeader,
-			},
-		},
+func getSessionHeader(headers []*corev3.HeaderValue) string {
+	for _, headerValue := range headers {
+		if headerValue.GetKey() == "session" {
+			return headerValue.GetValue()
+		}
 	}
-
-	log.Debugf("Modified session header to: %s", newHeader)
-
-	// Construct response
-	response := &authv3.CheckResponse{
-		Status: status.New(codes.OK, "").Proto(),
-		HttpResponse: &authv3.CheckResponse_OkResponse{
-			OkResponse: &authv3.OkHttpResponse{
-				Headers: headers,
-			},
-		},
-	}
-
-	// Log the response before returning
-	log.Debugf("Returning CheckResponse: %+v", response)
-
-	return response, nil
+	return ""
 }
 
 func init() {
@@ -97,9 +129,9 @@ func main() {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	// Create a new gRPC server and register the authorization service
+	// Create a new gRPC server and register the external processor service
 	server := grpc.NewServer()
-	authv3.RegisterAuthorizationServer(server, &headerModifier{})
+	extprocv3.RegisterExternalProcessorServer(server, &externalProcessorServer{})
 
 	// Channel to listen for OS interrupt signals for graceful shutdown
 	stop := make(chan os.Signal, 1)
