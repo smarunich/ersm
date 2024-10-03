@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -11,6 +10,7 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	log "github.com/sirupsen/logrus" // Import logrus for advanced logging
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,10 +21,13 @@ type headerModifier struct {
 }
 
 func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
+	// Log the detailed request at debug level
+	log.Debugf("Received CheckRequest: %+v", req)
+
 	// Extract the "session" header from the incoming request
 	sessionHeader := req.Attributes.Request.Http.Headers["session"]
 	if sessionHeader == "" {
-		log.Println("Missing session header")
+		log.Warn("Missing session header")
 		return &authv3.CheckResponse{
 			Status: status.New(codes.PermissionDenied, "Missing session header").Proto(),
 		}, nil
@@ -41,7 +44,7 @@ func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*
 		},
 	}
 
-	log.Printf("Session header modified: %s", newHeader)
+	log.Debugf("Session header modified to: %s", newHeader)
 	return &authv3.CheckResponse{
 		Status: status.New(codes.OK, "").Proto(),
 		HttpResponse: &authv3.CheckResponse_OkResponse{
@@ -53,6 +56,13 @@ func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*
 }
 
 func main() {
+	// Set log level to debug for detailed output
+	log.SetLevel(log.DebugLevel)
+	// Optionally, format logs with timestamps
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+
 	// Listen on a TCP port for gRPC connections
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
