@@ -4,6 +4,7 @@ go 1.21.3
 
 require (
 	github.com/envoyproxy/go-control-plane v0.13.0
+	github.com/sirupsen/logrus v1.9.3
 	google.golang.org/grpc v1.67.1
 )
 

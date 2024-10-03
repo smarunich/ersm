@@ -10,7 +10,7 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
-	log "github.com/sirupsen/logrus" // Import logrus for advanced logging
+	log "github.com/sirupsen/logrus" // Advanced logging with logrus
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,19 +21,28 @@ type headerModifier struct {
 }
 
 func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
-	// Log the detailed request at debug level
-	log.Debugf("Received CheckRequest: %+v", req)
+	// Log method entry
+	log.Debug("Entered Check method")
 
-	// Extract the "session" header from the incoming request
+	// Log the full request at trace level
+	log.Tracef("Full CheckRequest: %+v", req)
+
+	// Log request attributes
+	log.Debugf("Request Attributes: %+v", req.Attributes)
+
+	// Extract the "session" header
 	sessionHeader := req.Attributes.Request.Http.Headers["session"]
 	if sessionHeader == "" {
 		log.Warn("Missing session header")
-		return &authv3.CheckResponse{
+		// Log the response before returning
+		resp := &authv3.CheckResponse{
 			Status: status.New(codes.PermissionDenied, "Missing session header").Proto(),
-		}, nil
+		}
+		log.Debugf("Returning CheckResponse: %+v", resp)
+		return resp, nil
 	}
 
-	// Modify the session header and create a new header
+	// Modify the session header
 	newHeader := fmt.Sprintf("session-%s", sessionHeader)
 	headers := []*corev3.HeaderValueOption{
 		{
@@ -44,25 +53,44 @@ func (h *headerModifier) Check(ctx context.Context, req *authv3.CheckRequest) (*
 		},
 	}
 
-	log.Debugf("Session header modified to: %s", newHeader)
-	return &authv3.CheckResponse{
+	log.Debugf("Modified session header to: %s", newHeader)
+
+	// Construct response
+	response := &authv3.CheckResponse{
 		Status: status.New(codes.OK, "").Proto(),
 		HttpResponse: &authv3.CheckResponse_OkResponse{
 			OkResponse: &authv3.OkHttpResponse{
 				Headers: headers,
 			},
 		},
-	}, nil
+	}
+
+	// Log the response before returning
+	log.Debugf("Returning CheckResponse: %+v", response)
+
+	return response, nil
 }
 
-func main() {
-	// Set log level to debug for detailed output
-	log.SetLevel(log.DebugLevel)
-	// Optionally, format logs with timestamps
+func init() {
+	// Set log level from environment variable or default to debug
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "debug" // Default to debug level
+	}
+
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		log.Fatalf("Invalid LOG_LEVEL: %v", err)
+	}
+	log.SetLevel(level)
+
+	// Format logs with full timestamps
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 	})
+}
 
+func main() {
 	// Listen on a TCP port for gRPC connections
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
