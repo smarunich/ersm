@@ -1,23 +1,37 @@
-# Use the official Golang image as the base image
-FROM golang:1.21-alpine
+# syntax=docker/dockerfile:1
 
-# Set the Current Working Directory inside the container
+# Build stage
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
 WORKDIR /app
 
-# Copy go mod and sum files
+# Copy go.mod and go.sum files
 COPY go.mod go.sum ./
 
-# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
+# Download dependencies
 RUN go mod download
 
-# Copy the source from the current directory to the Working Directory inside the container
+# Copy the source code
 COPY . .
 
 # Build the Go app
-RUN go build -o main .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -a -o ersm .
 
-# Expose port 8080 to the outside world
-EXPOSE 8080
+# Final image
+FROM --platform=$TARGETPLATFORM alpine:latest
 
-# Command to run the executable
-CMD ["./main"]
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+# Copy the binary from the builder
+COPY --from=builder /app/ersm .
+
+# Set execution permissions (if needed)
+RUN chmod +x ./ersm
+
+# Run the binary
+CMD ["./ersm"]

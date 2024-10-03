@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ersm-deployment
+  name: ersm
   labels:
     app: ersm
 spec:
@@ -16,20 +16,20 @@ spec:
     spec:
       containers:
       - name: ersm
-        image: {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+        image: us-east1-docker.pkg.dev/dogfood-cx/registryrepository/ersm:latest  # These are placeholders to be replaced
         imagePullPolicy: Always
         ports:
-        - containerPort: 8080
+        - containerPort: 50051
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ersm-service
+  name: ersm
 spec:
   selector:
     app: ersm
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 8080
+      port: 50051
+      targetPort: 50051
   type: ClusterIP

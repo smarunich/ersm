@@ -4,6 +4,7 @@ vars:
   REGISTRY: us-east1-docker.pkg.dev/dogfood-cx/registryrepository
   IMAGE_NAME: ersm
   IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'
+  NAMESPACE: '{{.NAMESPACE | default "default"}}'  # Default namespace is 'default'
 
 tasks:
   init:
@@ -43,7 +44,7 @@ tasks:
     desc: Build the Go application using Docker
     deps: [init]
     cmds:
-      - docker build -t {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} .
+      - docker buildx build --platform linux/amd64,linux/arm64 -t {{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} .
 
   docker-push:
     desc: Push the Docker image to the registry
@@ -79,11 +80,10 @@ tasks:
 
   k8s-deploy:
     desc: Deploy the application to Kubernetes
-    deps: [docker-push]
     cmds:
-      - sed 's|{{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}|{{.REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}|g' deployment.yaml | kubectl apply -f -
+      - kubectl apply -f deployment.yaml -n {{.NAMESPACE}}
 
   k8s-delete:
     desc: Delete the Kubernetes deployment
     cmds:
-      - kubectl delete -f deployment.yaml
+      - kubectl delete -f deployment.yaml -n {{.NAMESPACE}}
